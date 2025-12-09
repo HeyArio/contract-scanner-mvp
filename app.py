@@ -101,7 +101,7 @@ def analyze_contract(text):
 
     try:
         # Make the request
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url.strip(), headers=headers, json=payload)
         
         # Check for HTTP errors (404, 500, etc.)
         if response.status_code != 200:
