@@ -16,14 +16,16 @@ st.set_page_config(
 )
 
 # 1. Get API Key
-api_key = os.environ.get("GOOGLE_API_KEY")
+# 1. Get API Key
+# We use .strip() to remove accidental spaces or newlines from the .env file
+api_key = os.environ.get("GOOGLE_API_KEY", "").strip() 
+
 if not api_key:
     try:
-        api_key = st.secrets["GOOGLE_API_KEY"]
+        api_key = st.secrets["GOOGLE_API_KEY"].strip()
     except:
         st.error("⚠️ خطای امنیتی: کلید API پیدا نشد.")
         st.stop()
-
 # --- THE LEGAL BRAIN (System Prompt) ---
 SYSTEM_PROMPT = """
 You are a Senior Legal Advisor specialized in the Civil Law of Iran (Qanun-e Madani).
