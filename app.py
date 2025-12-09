@@ -1,12 +1,13 @@
 import streamlit as st
-import requests  # <--- NEW: Using direct HTTP requests
+import requests  # Using direct HTTP requests
 import pypdf
 import os
 import json
 from dotenv import load_dotenv
 
 # --- CONFIGURATION ---
-load_dotenv()
+# Force reload to ignore old cached keys
+load_dotenv(override=True)
 
 st.set_page_config(
     page_title="Hoghoughi AI - Contract Scanner",
@@ -15,28 +16,36 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 1. Get API Key
-# 1. Get API Key
-# We use .strip() to remove accidental spaces or newlines from the .env file
-api_key = os.environ.get("GOOGLE_API_KEY", "").strip() 
+# 1. Get API Key securely
+def get_api_key():
+    # Try getting from .env first
+    env_key = os.environ.get("GOOGLE_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    
+    # Fallback to Streamlit secrets (for cloud deployment)
+    try:
+        return st.secrets["GOOGLE_API_KEY"].strip()
+    except:
+        return None
+
+api_key = get_api_key()
 
 if not api_key:
-    try:
-        api_key = st.secrets["GOOGLE_API_KEY"].strip()
-    except:
-        st.error("⚠️ خطای امنیتی: کلید API پیدا نشد.")
-        st.stop()
+    st.error("⚠️ خطای امنیتی: کلید API پیدا نشد. لطفا فایل .env یا Secrets را بررسی کنید.")
+    st.stop()
+
 # --- THE LEGAL BRAIN (System Prompt) ---
 SYSTEM_PROMPT = """
 You are a Senior Legal Advisor specialized in the Civil Law of Iran (Qanun-e Madani).
 Your task is to analyze the provided contract text (in Farsi) and identify risks based on Iranian law.
 
 CRITICAL RULES:
-1.  **Output Format:** Return ONLY a valid JSON object. Do not add markdown like ```json`.
-2.  **Language:** All explanations must be in simple, clear Farsi (Persian).
-3.  **Risk Calibration:**
-    * **High Risk (Red):** Unilateral termination (فسخ یک‌طرفه), Waiver of all options (اسقاط کافه خیارات), Uncapped penalties (جریمه بدون سقف), undefined arbitration (داوری مبهم).
-    * **Medium Risk (Yellow):** Vague timelines, automatic renewal without notice.
+1.  Output Format: Return ONLY a valid JSON object. Do not add markdown like ```json.
+2.  Language: All explanations must be in simple, clear Farsi (Persian).
+3.  Risk Calibration:
+    * High Risk (Red): Unilateral termination (فسخ یک‌طرفه), Waiver of all options (اسقاط کافه خیارات), Uncapped penalties (جریمه بدون سقف), undefined arbitration (داوری مبهم).
+    * Medium Risk (Yellow): Vague timelines, automatic renewal without notice.
 
 JSON STRUCTURE:
 {
@@ -77,11 +86,15 @@ def extract_text(uploaded_file):
 
 def analyze_contract(text):
     """
-    UPDATED: Uses direct REST API call to Gemini 2.5 Flash
-    This bypasses the SDK and hits the URL directly.
+    UPDATED: Uses direct REST API call to Gemini
+    Fixed: Uses the 'lite' model and sanitizes URL to prevent 'No Connection Adapter' errors.
     """
-    # The exact URL you requested
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=){api_key}"
+    # 1. HARDCODED BASE URL (The one you confirmed works)
+    base_url = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent)"
+    
+    # 2. CONSTRUCT URL & SANITIZE
+    # This .replace() chain removes the quotes that cause the "Adapter" crash
+    url = f"{base_url}?key={api_key}".strip().replace('"', '').replace("'", "")
     
     headers = {
         "Content-Type": "application/json"
@@ -101,7 +114,7 @@ def analyze_contract(text):
 
     try:
         # Make the request
-        response = requests.post(url.strip(), headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload)
         
         # Check for HTTP errors (404, 500, etc.)
         if response.status_code != 200:
@@ -112,12 +125,16 @@ def analyze_contract(text):
         result = response.json()
         
         # Extract the text from the candidates
-        raw_text = result['candidates'][0]['content']['parts'][0]['text']
-        
-        # Clean up code fences if the model added them despite instructions
-        clean_json = raw_text.replace("```json", "").replace("```", "").strip()
-        
-        return json.loads(clean_json)
+        if 'candidates' in result and result['candidates']:
+            raw_text = result['candidates'][0]['content']['parts'][0]['text']
+            
+            # Clean up code fences if the model added them despite instructions
+            clean_json = raw_text.replace("```json", "").replace("```", "").strip()
+            
+            return json.loads(clean_json)
+        else:
+            st.error("No candidates returned from API.")
+            return None
 
     except Exception as e:
         st.error(f"Analysis Failed: {e}")
@@ -126,7 +143,7 @@ def analyze_contract(text):
 # --- UI LAYOUT ---
 st.title("🇮🇷 دستیار هوشمند بررسی قرارداد (MVP)")
 st.markdown("""
-این سیستم با استفاده از **Gemini 2.5 Flash** قرارداد شما را بررسی می‌کند.
+این سیستم با استفاده از **Gemini 2.5 Flash Lite** قرارداد شما را بررسی می‌کند.
 فایل PDF یا متن قرارداد را آپلود کنید.
 """)
 
